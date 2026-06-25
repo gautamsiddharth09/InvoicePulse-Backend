@@ -2,6 +2,7 @@
 
 require("dotenv").config()
 
+
 const express = require("express")
 const cookieParser = require("cookie-parser")
 const cors = require("cors")
@@ -10,6 +11,7 @@ const connectDB = require("./config/db")
 const authRoutes = require("./routes/authRoutes")
 const invoiceRoutes = require("./routes/invoiceRoutes")
 const aiRoutes = require("./routes/aiRoutes")
+const productRoutes = require("./routes/productRoutes")
 
 
 const app = express()
@@ -22,6 +24,8 @@ app.use(
   })
 )
 
+app.use('/uploads', express.static('uploads'))
+
 // connect data base
 connectDB()
 
@@ -32,6 +36,7 @@ app.use(cookieParser())
 // routes here
 app.use("/api/auth",authRoutes)
 app.use("/api/invoice", invoiceRoutes);
+app.use("/api/products", productRoutes );
 app.use("/api/ai", aiRoutes);
 
 // start server
