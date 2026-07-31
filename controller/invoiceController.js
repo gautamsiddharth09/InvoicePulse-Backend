@@ -1,4 +1,5 @@
 const Invoice = require("../models/Invoice");
+const Counter = require("../models/Counter"); // new line
 
 // if num is undefined then it will now throw ref error
 const roundToTwo = (num) => Number((Number(num) || 0).toFixed(2));
@@ -14,8 +15,9 @@ const calculateItemPricing = (item) => {
   if (mrpPrice <= 0) throw new Error("MRP must be greater than 0");
 
   // Logic: Selling Price में से % डिस्काउंट घटाएं
-  const finalPricePerItem = discountedPrice - (discountedPrice * (discountPercent / 100));
-  
+  const finalPricePerItem =
+    discountedPrice - discountedPrice * (discountPercent / 100);
+
   // Total Savings = (MRP - FinalPrice) * Qty
   const savings = (mrpPrice - finalPricePerItem) * quantity;
 
@@ -24,7 +26,7 @@ const calculateItemPricing = (item) => {
     mrpPrice: roundToTwo(mrpPrice),
     discountPercent: roundToTwo(discountPercent),
     finalPricePerItem: roundToTwo(finalPricePerItem), // यह GST Inclusive है
-    savings: roundToTwo(savings)
+    savings: roundToTwo(savings),
   };
 };
 
@@ -36,14 +38,15 @@ const calculateInvoiceTotals = (items, taxRate, shippingCharge) => {
   for (const item of items) {
     const qty = Number(item.quantity) || 0;
     const mrp = Number(item.mrpPrice) || 0;
-    const discPrice = Number(item.discountedPrice || item.finalPricePerItem) || 0;
+    const discPrice =
+      Number(item.discountedPrice || item.finalPricePerItem) || 0;
     totalMRP += mrp * qty;
     totalDiscounted += discPrice * qty;
     // console.log(`Item: ${item.name}, MRP: ${mrp}, Disc: ${discPrice}, Qty: ${qty}`);
   }
 
-//  if result is nan
-  const discountTotal = (totalMRP - totalDiscounted);
+  //  if result is nan
+  const discountTotal = totalMRP - totalDiscounted;
   const finalDiscountTotal = isNaN(discountTotal) ? 0 : discountTotal;
 
   const taxFactor = 1 + (Number(taxRate) || 0) / 100;
@@ -60,7 +63,6 @@ const calculateInvoiceTotals = (items, taxRate, shippingCharge) => {
   };
 };
 
-
 // create Invoice
 const createInvoice = async (req, res) => {
   try {
@@ -71,6 +73,7 @@ const createInvoice = async (req, res) => {
 
     const {
       invoiceDate,
+      invoiceNumber,
       dueDate,
       billFrom,
       billTo,
@@ -92,7 +95,6 @@ const createInvoice = async (req, res) => {
       });
     }
 
-
     const processedItems = items.map((item) => {
       const normalized = calculateItemPricing(item);
 
@@ -102,8 +104,8 @@ const createInvoice = async (req, res) => {
         description: item.description || "",
         quantity: normalized.quantity,
         mrpPrice: normalized.mrpPrice,
-        discountPercent: normalized.discountPercent, 
-        discountedPrice: normalized.finalPricePerItem, 
+        discountPercent: normalized.discountPercent,
+        discountedPrice: normalized.finalPricePerItem,
       };
     });
 
@@ -111,11 +113,46 @@ const createInvoice = async (req, res) => {
     const { subtotal, taxTotal, discountTotal, grandTotal } =
       calculateInvoiceTotals(processedItems, taxRate, shippingCharge);
 
-    const invoiceNumber = `INV-${Date.now()}`;
+    // const invoiceNumber = `INV-${Date.now()}`;  old line
+let finalInvoiceNumber;
+
+if (invoiceNumber?.trim()) {
+  // User entered a custom invoice number
+  finalInvoiceNumber = invoiceNumber.trim();
+} else {
+  // Auto-generate the next invoice number
+  const counter = await Counter.findOneAndUpdate(
+    {
+      user: user._id,
+      name: "invoice",
+    },
+    {
+      $inc: { sequence: 1 },
+    },
+    {
+      new: true,
+      upsert: true,
+    }
+  );
+
+  finalInvoiceNumber = `INV-${String(counter.sequence).padStart(3, "0")}`;
+}
+
+    const existingInvoice = await Invoice.findOne({
+      user: req.user._id,
+      invoiceNumber: finalInvoiceNumber,
+    });
+
+    if (existingInvoice) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number already exists.",
+      });
+    }
 
     const invoice = await Invoice.create({
       user: user._id,
-      invoiceNumber,
+      invoiceNumber: finalInvoiceNumber,
       invoiceDate,
       dueDate,
       billFrom,
@@ -128,11 +165,11 @@ const createInvoice = async (req, res) => {
       status,
       currency,
       taxRate: Number(taxRate) || 0,
-      discountTotal,    
+      discountTotal,
       shippingCharge: Number(shippingCharge) || 0,
-      subtotal,          
-      taxTotal,          
-      grandTotal,        
+      subtotal,
+      taxTotal,
+      grandTotal,
       paymentInfo,
     });
 
@@ -214,7 +251,6 @@ const getInvoiceById = async (req, res) => {
   }
 };
 
-
 // update Invoice
 const updateInvoice = async (req, res) => {
   try {
@@ -237,7 +273,10 @@ const updateInvoice = async (req, res) => {
       });
     }
 
+
+
     const {
+        invoiceNumber,
       invoiceDate,
       dueDate,
       billFrom,
@@ -253,6 +292,21 @@ const updateInvoice = async (req, res) => {
       paymentInfo,
       shippingCharge: inputShipping,
     } = req.body;
+
+        const finalInvoiceNumber = invoiceNumber?.trim() || invoice.invoiceNumber;
+
+const existingInvoice = await Invoice.findOne({
+  user: req.user._id,
+  invoiceNumber: finalInvoiceNumber,
+  _id: { $ne: id },
+});
+
+if (existingInvoice) {
+  return res.status(400).json({
+    success: false,
+    message: "Invoice number already exists.",
+  });
+}
 
     // is there is no value in data base then  use old value
     const finalShipping =
@@ -274,12 +328,11 @@ const updateInvoice = async (req, res) => {
         description: item.description || "",
         quantity: normalized.quantity,
         mrpPrice: normalized.mrpPrice,
-        discountPercent: normalized.discountPercent, 
-        discountedPrice: normalized.finalPricePerItem, 
+        discountPercent: normalized.discountPercent,
+        discountedPrice: normalized.finalPricePerItem,
       };
     });
 
-    
     const { subtotal, taxTotal, discountTotal, grandTotal } =
       calculateInvoiceTotals(processedItems, finalTaxRate, finalShipping);
 
@@ -287,6 +340,7 @@ const updateInvoice = async (req, res) => {
     const updatedInvoice = await Invoice.findOneAndUpdate(
       { _id: id, user: req.user._id },
       {
+         invoiceNumber: finalInvoiceNumber,
         invoiceDate,
         dueDate,
         billFrom,
@@ -299,11 +353,11 @@ const updateInvoice = async (req, res) => {
         status,
         currency,
         taxRate: finalTaxRate,
-        discountTotal, 
+        discountTotal,
         shippingCharge: finalShipping,
-        subtotal,    
-        taxTotal,     
-        grandTotal,   
+        subtotal,
+        taxTotal,
+        grandTotal,
         paymentInfo,
       },
       { new: true, runValidators: true },
