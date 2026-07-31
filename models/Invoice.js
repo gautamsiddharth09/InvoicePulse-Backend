@@ -174,7 +174,7 @@ const invoiceSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["Paid", "Unpaid"],
-      default: "Unpaid",
+      default: "Paid",
     },
 
     currency: {
